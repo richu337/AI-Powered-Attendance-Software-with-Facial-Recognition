@@ -294,11 +294,6 @@ export const AttendanceManager: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="text-[13px] font-semibold text-text-main">{staff.fullName}</p>
-                          {attendance[staff.id]?.aiVerified && (
-                             <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-brand-indigo rounded text-[9px] font-bold uppercase tracking-tighter border border-indigo-100">
-                               <Shield className="w-2 h-2" /> AI Verified
-                             </span>
-                          )}
                         </div>
                         <p className="text-[11px] text-text-muted">{staff.role}</p>
                       </div>
