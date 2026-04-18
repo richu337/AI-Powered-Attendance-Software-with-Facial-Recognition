@@ -1,0 +1,90 @@
+export type UserRole = 'admin' | 'staff';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  staffId?: string;
+}
+
+export type SalaryType = 'Monthly' | 'Daily' | 'Hourly';
+
+export interface Staff {
+  id: string;
+  fullName: string;
+  phoneNumber: string;
+  email: string;
+  role: string;
+  joiningDate: string;
+  salaryType: SalaryType;
+  salaryAmount: number;
+  workShift: string;
+  userId?: string;
+  isAdmin?: boolean;
+}
+
+export type AttendanceStatus = 'Present' | 'Absent' | 'Half Day' | 'Leave';
+
+export interface Attendance {
+  id: string;
+  staffId: string;
+  staffName: string;
+  date: string;
+  status: AttendanceStatus;
+  checkIn?: string;
+  checkOut?: string;
+  notes?: string;
+  aiVerified?: boolean;
+  overtimeMinutes?: number;
+}
+
+export interface Shift {
+  id: string;
+  name: string;
+  startTime: string; // HH:mm
+  endTime: string;   // HH:mm
+  minHoursForFullDay: number;
+}
+
+export type LeaveType = 'Sick' | 'Casual' | 'Emergency' | 'Other';
+export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export interface LeaveRequest {
+  id: string;
+  staffId: string;
+  staffName: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  rejectionReason?: string;
+  status: LeaveStatus;
+  appliedAt: string;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  message: string;
+  details?: string;
+  type: 'leave_request' | 'leave_status_update';
+  read: boolean;
+  createdAt: string;
+  link?: string;
+}
+
+export interface Payroll {
+  id: string;
+  staffId: string;
+  staffName: string;
+  month: string;
+  workingDays: number;
+  presentDays: number;
+  leavesTaken: number;
+  finalSalary: number;
+  bonus: number;
+  deductions: number;
+  status: 'Paid' | 'Pending';
+  generatedAt: string;
+}

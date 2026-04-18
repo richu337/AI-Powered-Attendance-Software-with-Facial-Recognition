@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user with role-based access",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "staffId": { "type": "string", "description": "Link to staff collection if role is staff" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "Employee record managed by admin",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" },
+        "joiningDate": { "type": "string", "format": "date" },
+        "salaryType": { "type": "string", "enum": ["Monthly", "Daily", "Hourly"] },
+        "salaryAmount": { "type": "number" },
+        "workShift": { "type": "string" },
+        "userId": { "type": "string", "description": "Associated user UID if linked" }
+      },
+      "required": ["fullName", "email", "salaryType", "salaryAmount"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance record",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Present", "Absent", "Half Day", "Leave"] },
+        "checkIn": { "type": "string" },
+        "checkOut": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["staffId", "date", "status"]
+    },
+    "LeaveRequest": {
+      "title": "LeaveRequest",
+      "description": "Employee request for time off",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "leaveType": { "type": "string", "enum": ["Sick", "Casual", "Emergency", "Other"] },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "appliedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["staffId", "leaveType", "startDate", "endDate", "status"]
+    },
+    "Payroll": {
+      "title": "Payroll",
+      "description": "Monthly payment record",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "month": { "type": "string", "description": "MM-YYYY format" },
+        "workingDays": { "type": "number" },
+        "presentDays": { "type": "number" },
+        "leavesTaken": { "type": "number" },
+        "finalSalary": { "type": "number" },
+        "bonus": { "type": "number" },
+        "deductions": { "type": "number" },
+        "status": { "type": "string", "enum": ["Paid", "Pending"] },
+        "generatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["staffId", "month", "finalSalary", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/staff/{staffId}": { "schema": "Staff", "description": "Staff documents" },
+    "/attendance/{attendanceId}": { "schema": "Attendance", "description": "Attendance logs" },
+    "/leaves/{leaveId}": { "schema": "LeaveRequest", "description": "Leave requests" },
+    "/payroll/{payrollId}": { "schema": "Payroll", "description": "Payroll records" }
+  }
+}

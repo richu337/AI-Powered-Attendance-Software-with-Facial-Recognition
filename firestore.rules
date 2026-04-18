@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, email, displayName, role, staffId
+    //
+    // Collection: staff
+    // Fields: fullName, phoneNumber, email, role, joiningDate, salaryType, salaryAmount, workShift, userId, isAdmin
+    //
+    // Collection: settings
+    // Fields: text, author (for /announcement)
+    //
+    // Collection: attendance
+    // Fields: staffId, staffName, date, status, checkIn, checkOut, notes, aiVerified
+    //
+    // Collection: leaves
+    // Fields: staffId, staffName, leaveType, startDate, endDate, reason, status, appliedAt
+    //
+    // Collection: payroll
+    // Fields: staffId, staffName, month, workingDays, presentDays, leavesTaken, finalSalary, bonus, deductions, status, generatedAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "rayhanjaleel904@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isStaffMember(staffId) {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffId == staffId ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffId == null && isAdmin());
+    }
+
+    function isOwnRecord(recordStaffId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return isAuthenticated() && userDoc.staffId == recordStaffId;
+    }
+
+    // ===============================================================
+    // Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.email is string && data.role in ['admin', 'staff'];
+    }
+
+    function isValidStaff(data) {
+      return data.fullName is string && data.fullName.size() < 100 &&
+             data.email is string && data.salaryAmount is number &&
+             (!('isAdmin' in data) || data.isAdmin is bool);
+    }
+
+    function isValidAttendance(data) {
+      return data.staffId is string && data.date is string && data.status in ['Present', 'Absent', 'Half Day', 'Leave'];
+    }
+
+    function isValidLeave(data) {
+      return data.staffId is string && data.startDate is string && data.endDate is string &&
+             data.status in ['Pending', 'Approved', 'Rejected'] &&
+             (!('rejectionReason' in data) || data.rejectionReason is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == uid && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || (request.auth.uid == uid && request.resource.data.role == resource.data.role && request.resource.data.staffId == resource.data.staffId));
+    }
+
+    match /staff/{staffId} {
+      // Allow searching for own staff record by email during login
+      allow list: if isAuthenticated() && (isAdmin() || request.query.limit <= 1);
+      allow get: if isAuthenticated() && (isAdmin() || isOwnRecord(staffId) || request.auth.token.email == resource.data.email);
+      
+      allow create: if isAdmin() && isValidStaff(request.resource.data);
+      allow update: if isAdmin() && isValidStaff(request.resource.data) || 
+                   (isAuthenticated() && request.auth.token.email == resource.data.email && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId']) &&
+                    request.resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /settings/announcement {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /attendance/{atId} {
+      allow read: if isAuthenticated() && (isAdmin() || isOwnRecord(resource.data.staffId));
+      allow create: if isAuthenticated() && (isAdmin() || (isOwnRecord(request.resource.data.staffId) && request.resource.data.status != 'Leave')) && isValidAttendance(request.resource.data);
+      allow update: if isAdmin() && isValidAttendance(request.resource.data);
+    }
+
+    match /leaves/{leaveId} {
+      allow read: if isAuthenticated() && (isAdmin() || isOwnRecord(resource.data.staffId));
+      allow create: if isAuthenticated() && isOwnRecord(request.resource.data.staffId) && isValidLeave(request.resource.data);
+      allow update: if isAdmin() && isValidLeave(request.resource.data);
+    }
+
+    match /payroll/{payrollId} {
+      allow read: if isAuthenticated() && (isAdmin() || isOwnRecord(resource.data.staffId));
+      allow write: if isAdmin();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+  }
+}

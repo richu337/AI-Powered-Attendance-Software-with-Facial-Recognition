@@ -1,0 +1,8 @@
+{
+  "name": "AI-Powered Attendance Software with Facial Recognition",
+  "description": "An intelligent attendance management system featuring AI-driven tracking, role-based access, and facial recognition capabilities for secure staff management.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  
+  --color-brand-indigo: #4F46E5;
+  --color-surface-main: #F0F2F5;
+  --color-sidebar-bg: #1A1C23;
+  --color-sidebar-active: #2D303E;
+  --color-text-main: #1F2937;
+  --color-text-muted: #6B7280;
+  --color-border-main: #E5E7EB;
+}
+
+@layer base {
+  body {
+    @apply font-sans antialiased bg-surface-main text-text-main;
+  }
+}
+
+/* Custom styles for React Day Picker */
+.rdp {
+  --rdp-cell-size: 34px;
+  --rdp-accent-color: #4F46E5;
+  --rdp-background-color: #EEF2FF;
+  margin: 0;
+}
+
+.rdp-day_selected, .rdp-day_selected:focus-visible, .rdp-day_selected:hover {
+  background-color: var(--rdp-accent-color) !important;
+  color: white !important;
+}
+
+.rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: var(--rdp-background-color);
+  color: var(--rdp-accent-color);
+}
+
+.rdp-head_cell {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #6B7280;
+}
