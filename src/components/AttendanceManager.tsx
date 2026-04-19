@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Staff, Attendance, AttendanceStatus, Shift } from '../types';
 import { useAuth } from './AuthProvider';
-import { Calendar, CheckCircle2, XCircle, Clock, Save, ChevronLeft, ChevronRight, Shield } from 'lucide-react';
-import { format, addDays, subDays, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
+import { Calendar, CheckCircle2, XCircle, Clock, Save, ChevronLeft, ChevronRight, Shield, Camera } from 'lucide-react';
+import { format, addDays, subDays, parseISO, isValid } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { DayPicker } from 'react-day-picker';
 import * as Popover from '@radix-ui/react-popover';
@@ -33,33 +32,77 @@ export const AttendanceManager: React.FC = () => {
   };
 
   useEffect(() => {
-    const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-      setStaffList(snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff)));
-    });
+    fetchData();
 
-    const unsubShifts = onSnapshot(collection(db, 'shifts'), (snap) => {
-      setShifts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Shift)));
-    });
-
-    const unsubAttendance = onSnapshot(
-      query(collection(db, 'attendance'), where('date', '==', selectedDate)),
-      (snap) => {
-        const atMap: Record<string, Attendance> = {};
-        snap.docs.forEach(d => {
-          const data = d.data() as Attendance;
-          atMap[data.staffId] = { ...data, id: d.id };
-        });
-        setAttendance(atMap);
-        setLoading(false);
-      }
-    );
+    const attendanceSubscription = supabase
+      .channel('attendance_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'attendance', filter: `date=eq.${selectedDate}` }, () => {
+        fetchAttendance();
+      })
+      .subscribe();
 
     return () => {
-      unsubStaff();
-      unsubShifts();
-      unsubAttendance();
+      supabase.removeChannel(attendanceSubscription);
     };
   }, [selectedDate]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    await Promise.all([fetchStaff(), fetchShifts(), fetchAttendance()]);
+    setLoading(false);
+  };
+
+  const fetchStaff = async () => {
+    const { data } = await supabase.from('staff').select('*');
+    if (data) {
+      setStaffList(data.map(m => ({
+        id: m.id,
+        staffId: m.staff_id,
+        fullName: m.full_name,
+        email: m.email,
+        phoneNumber: m.phone_number,
+        role: m.role,
+        joiningDate: m.joining_date,
+        salaryType: m.salary_type,
+        salaryAmount: m.salary_amount,
+        workShift: m.work_shift,
+        isAdmin: m.is_admin,
+        pin: m.pin
+      })));
+    }
+  };
+
+  const fetchShifts = async () => {
+    const { data } = await supabase.from('shifts').select('*');
+    if (data) setShifts(data);
+  };
+
+  const fetchAttendance = async () => {
+    const { data } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('date', selectedDate);
+
+    if (data) {
+      const atMap: Record<string, Attendance> = {};
+      data.forEach(m => {
+        atMap[m.staff_id] = {
+          id: m.id,
+          staffId: m.staff_id,
+          staffName: m.staff_name,
+          date: m.date,
+          status: m.status,
+          checkIn: m.check_in,
+          checkOut: m.check_out,
+          notes: m.notes,
+          aiVerified: m.ai_verified,
+          faceMatchScore: m.face_match_score,
+          overtimeMinutes: m.overtime_minutes
+        };
+      });
+      setAttendance(atMap);
+    }
+  };
 
   const calculateAutoStatus = (checkIn: string, checkOut: string, shiftName: string): { status: AttendanceStatus, overtime: number } => {
     const shift = shifts.find(s => s.name === shiftName);
@@ -72,19 +115,18 @@ export const AttendanceManager: React.FC = () => {
 
     const inTime = parseTime(checkIn);
     const outTime = parseTime(checkOut);
-    const shiftStart = parseTime(shift.startTime);
-    const shiftEnd = parseTime(shift.endTime);
+    const shiftEnd = parseTime(shift.end_time);
     
+    // Determine status
+    let status: AttendanceStatus = 'Present';
     const workingMinutes = outTime - inTime;
     const workingHours = workingMinutes / 60;
 
-    // Determine status
-    let status: AttendanceStatus = 'Present';
-    if (workingHours < shift.minHoursForFullDay) {
+    if (workingHours < (shift.min_hours_for_full_day || 8)) {
       status = 'Half Day';
     }
 
-    // Determine overtime (only if checkout is after shift end)
+    // Determine overtime
     let overtime = 0;
     if (outTime > shiftEnd) {
       overtime = outTime - shiftEnd;
@@ -96,27 +138,28 @@ export const AttendanceManager: React.FC = () => {
   const handleStatusChange = async (staff: Staff, status: AttendanceStatus) => {
     if (!isAdmin) return;
 
-    const existingId = attendance[staff.id]?.id;
-    const now = format(new Date(), 'HH:mm');
+    const existing = attendance[staff.staffId];
+    const nowTime = format(new Date(), 'HH:mm:ss');
 
-    const data: any = {
-      staffId: staff.id,
-      staffName: staff.fullName,
+    const payload: any = {
+      staff_id: staff.staffId,
+      staff_name: staff.fullName,
       date: selectedDate,
       status,
-      lastUpdated: new Date().toISOString(),
+      last_updated: new Date().toISOString(),
     };
 
     if (status === 'Present') {
-      data.checkIn = attendance[staff.id]?.checkIn || shiftStartTime(staff) || now;
+      payload.check_in = existing?.checkIn || shiftStartTime(staff) || nowTime;
     }
 
     try {
-      if (existingId) {
-        await updateDoc(doc(db, 'attendance', existingId), data);
+      if (existing?.id) {
+        await supabase.from('attendance').update(payload).eq('id', existing.id);
       } else {
-        await addDoc(collection(db, 'attendance'), data);
+        await supabase.from('attendance').insert([payload]);
       }
+      fetchAttendance();
     } catch (error) {
       console.error('Error marking attendance:', error);
     }
@@ -124,7 +167,7 @@ export const AttendanceManager: React.FC = () => {
 
   const shiftStartTime = (staff: Staff) => {
     const s = shifts.find(sh => sh.name === staff.workShift);
-    return s?.startTime;
+    return s?.start_time;
   };
 
   const saveDetailedAttendance = async (e: React.FormEvent) => {
@@ -132,37 +175,38 @@ export const AttendanceManager: React.FC = () => {
     if (!editingAttendance || !isAdmin) return;
 
     const { staff, data } = editingAttendance;
-    const existingId = attendance[staff.id]?.id;
+    const existing = attendance[staff.staffId];
 
     const { status, overtime } = calculateAutoStatus(data.checkIn || '', data.checkOut || '', staff.workShift);
 
-    const finalData = {
-      staffId: staff.id,
-      staffName: staff.fullName,
+    const payload = {
+      staff_id: staff.staffId,
+      staff_name: staff.fullName,
       date: selectedDate,
       status: data.status || status,
-      checkIn: data.checkIn,
-      checkOut: data.checkOut,
+      check_in: data.checkIn || null,
+      check_out: data.checkOut || null,
       notes: data.notes,
-      overtimeMinutes: overtime,
-      lastUpdated: new Date().toISOString(),
+      overtime_minutes: overtime,
+      last_updated: new Date().toISOString(),
     };
 
     try {
-      if (existingId) {
-        await updateDoc(doc(db, 'attendance', existingId), finalData);
+      if (existing?.id) {
+        await supabase.from('attendance').update(payload).eq('id', existing.id);
       } else {
-        await addDoc(collection(db, 'attendance'), finalData);
+        await supabase.from('attendance').insert([payload]);
       }
       setIsEditModalOpen(false);
       setEditingAttendance(null);
+      fetchAttendance();
     } catch (error) {
       console.error('Error saving detail:', error);
     }
   };
 
-  const StatusButton = ({ staff, status, label, color, icon: Icon }: any) => {
-    const isActive = attendance[staff.id]?.status === status;
+  const StatusButton = ({ staff, status, label, color }: any) => {
+    const isActive = attendance[staff.staffId]?.status === status;
     return (
       <button 
         onClick={() => handleStatusChange(staff, status)}
@@ -181,10 +225,14 @@ export const AttendanceManager: React.FC = () => {
 
   const visibleStaff = isAdmin 
     ? staffList 
-    : staffList.filter(s => s.id === profile?.staffId);
+    : staffList.filter(s => s.staffId === profile?.staffId);
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main">Daily Attendance</h1>
@@ -239,17 +287,6 @@ export const AttendanceManager: React.FC = () => {
                         }
                       }}
                       className="m-0 border-none"
-                      modifiersStyles={{
-                        selected: { 
-                          backgroundColor: '#4F46E5', 
-                          color: 'white',
-                          borderRadius: '8px'
-                        },
-                        today: {
-                          fontWeight: 'bold',
-                          color: '#4F46E5'
-                        }
-                      }}
                     />
                   </Popover.Content>
                 </Popover.Portal>
@@ -284,8 +321,14 @@ export const AttendanceManager: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-main">
-              {visibleStaff.map((staff) => (
-                <tr key={staff.id} className="hover:bg-gray-50 transition-colors group">
+              {visibleStaff.map((staff, idx) => (
+                <motion.tr 
+                  key={staff.id}
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.03 }}
+                  className="hover:bg-gray-50 transition-colors group"
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-indigo-50 rounded-full flex items-center justify-center text-brand-indigo font-bold text-xs uppercase">
@@ -294,6 +337,7 @@ export const AttendanceManager: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="text-[13px] font-semibold text-text-main">{staff.fullName}</p>
+                          <span className="text-[10px] font-mono text-text-muted">({staff.staffId})</span>
                         </div>
                         <p className="text-[11px] text-text-muted">{staff.role}</p>
                       </div>
@@ -306,28 +350,24 @@ export const AttendanceManager: React.FC = () => {
                         status="Present" 
                         label="P" 
                         color="bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]" 
-                        icon={CheckCircle2} 
                       />
                       <StatusButton 
                         staff={staff} 
                         status="Absent" 
                         label="A" 
                         color="bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]" 
-                        icon={XCircle} 
                       />
                       <StatusButton 
                         staff={staff} 
                         status="Half Day" 
                         label="H" 
                         color="bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]" 
-                        icon={Clock} 
                       />
                       <StatusButton 
                         staff={staff} 
                         status="Leave" 
                         label="L" 
                         color="bg-indigo-50 text-brand-indigo border-indigo-200" 
-                        icon={Calendar} 
                       />
                     </div>
                   </td>
@@ -338,29 +378,28 @@ export const AttendanceManager: React.FC = () => {
                              if(isAdmin) {
                                setEditingAttendance({ 
                                  staff, 
-                                 data: attendance[staff.id] || { checkIn: '', checkOut: '', notes: '' } 
+                                 data: attendance[staff.staffId] || { checkIn: '', checkOut: '', notes: '' } 
                                });
                                setIsEditModalOpen(true);
                              }
                            }}>
                         <div className="flex items-center gap-2">
                           <span className="text-text-muted w-8 font-bold uppercase transition-colors group-hover:text-brand-indigo">In:</span>
-                          <span className={cn(attendance[staff.id]?.checkIn ? "text-text-main" : "text-gray-300")}>
-                            {attendance[staff.id]?.checkIn || '--:--'}
+                          <span className={cn(attendance[staff.staffId]?.checkIn ? "text-text-main" : "text-gray-300")}>
+                            {attendance[staff.staffId]?.checkIn || '--:--'}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-text-muted w-8 font-bold uppercase transition-colors group-hover:text-brand-indigo">Out:</span>
-                          <span className={cn(attendance[staff.id]?.checkOut ? "text-text-main" : "text-gray-300")}>
-                            {attendance[staff.id]?.checkOut || '--:--'}
+                          <span className={cn(attendance[staff.staffId]?.checkOut ? "text-text-main" : "text-gray-300")}>
+                            {attendance[staff.staffId]?.checkOut || '--:--'}
                           </span>
                         </div>
-                        {attendance[staff.id]?.overtimeMinutes ? (
-                          <div className="mt-1 flex items-center gap-1.5 text-brand-indigo font-bold bg-indigo-50 px-1.5 py-0.5 rounded w-fit">
-                             <Clock className="w-2.5 h-2.5" /> 
-                             {Math.floor(attendance[staff.id]!.overtimeMinutes! / 60)}h {attendance[staff.id]!.overtimeMinutes! % 60}m OT
+                        {attendance[staff.staffId]?.aiVerified && (
+                          <div className="mt-1 flex items-center gap-1 text-green-600 font-bold bg-green-50 px-1.5 py-0.5 rounded w-fit">
+                             <Camera className="w-2.5 h-2.5" /> Face Verified
                           </div>
-                        ) : null}
+                        )}
                       </div>
                     </td>
                   )}
@@ -369,17 +408,19 @@ export const AttendanceManager: React.FC = () => {
                       type="text" 
                       placeholder="Add note..."
                       disabled={!isAdmin}
-                      value={attendance[staff.id]?.notes || ''}
+                      value={attendance[staff.staffId]?.notes || ''}
                       onChange={async (e) => {
-                        const existingId = attendance[staff.id]?.id;
-                        if (existingId) {
-                          await updateDoc(doc(db, 'attendance', existingId), { notes: e.target.value });
-                        }
+                         const val = e.target.value;
+                         const existing = attendance[staff.staffId];
+                         if (existing?.id) {
+                           await supabase.from('attendance').update({ notes: val }).eq('id', existing.id);
+                           fetchAttendance();
+                         }
                       }}
                       className="bg-gray-50 border border-border-main rounded-md px-3 py-1.5 text-xs w-full focus:ring-1 focus:ring-brand-indigo outline-none transition-all"
                     />
                   </td>
-                </tr>
+                </motion.tr>
               ))}
               {visibleStaff.length === 0 && !loading && (
                 <tr>
@@ -392,7 +433,7 @@ export const AttendanceManager: React.FC = () => {
           </table>
         </div>
       </div>
-      {/* Detail Edit Modal */}
+
       <AnimatePresence>
         {isEditModalOpen && editingAttendance && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -425,6 +466,7 @@ export const AttendanceManager: React.FC = () => {
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider text-center block">Check-In</label>
                     <input 
                       type="time" 
+                      step="1"
                       value={editingAttendance.data.checkIn || ''}
                       onChange={(e) => setEditingAttendance({
                         ...editingAttendance, 
@@ -437,6 +479,7 @@ export const AttendanceManager: React.FC = () => {
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider text-center block">Check-Out</label>
                     <input 
                       type="time" 
+                      step="1"
                       value={editingAttendance.data.checkOut || ''}
                       onChange={(e) => setEditingAttendance({
                         ...editingAttendance, 
@@ -463,7 +506,6 @@ export const AttendanceManager: React.FC = () => {
                       <option value="Absent">Absent</option>
                       <option value="Leave">Leave</option>
                     </select>
-                    <p className="text-[10px] text-text-muted italic">Leave as Auto-Detect to use shift rules.</p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -499,6 +541,6 @@ export const AttendanceManager: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 };

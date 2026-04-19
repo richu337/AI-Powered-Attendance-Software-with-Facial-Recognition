@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Shift } from '../types';
 import { useAuth } from './AuthProvider';
 import { Settings, Plus, Trash2, Edit2, Clock, Check, X, Shield, Info } from 'lucide-react';
@@ -25,26 +24,53 @@ export const SettingsManager: React.FC = () => {
 
   useEffect(() => {
     if (!isAdmin) return;
+    fetchShifts();
 
-    const unsub = onSnapshot(collection(db, 'shifts'), (snap) => {
-      setShifts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Shift)));
-      setLoading(false);
-    });
+    const shiftSubscription = supabase
+      .channel('shift_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'shifts' }, () => {
+        fetchShifts();
+      })
+      .subscribe();
 
-    return unsub;
+    return () => {
+      supabase.removeChannel(shiftSubscription);
+    };
   }, [isAdmin]);
+
+  const fetchShifts = async () => {
+    const { data, error } = await supabase.from('shifts').select('*');
+    if (!error && data) {
+      setShifts(data.map(m => ({
+        id: m.id,
+        name: m.name,
+        startTime: m.start_time,
+        endTime: m.end_time,
+        minHoursForFullDay: m.min_hours_for_full_day
+      })));
+    }
+    setLoading(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const payload = {
+      name: form.name,
+      start_time: form.startTime,
+      end_time: form.endTime,
+      min_hours_for_full_day: form.minHoursForFullDay,
+    };
+
     try {
       if (editingShift) {
-        await updateDoc(doc(db, 'shifts', editingShift.id), form);
+        await supabase.from('shifts').update(payload).eq('id', editingShift.id);
       } else {
-        await addDoc(collection(db, 'shifts'), form);
+        await supabase.from('shifts').insert([payload]);
       }
       setIsModalOpen(false);
       setEditingShift(null);
       setForm(initialForm);
+      fetchShifts();
     } catch (error) {
       console.error('Error saving shift:', error);
     }
@@ -52,7 +78,8 @@ export const SettingsManager: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this shift? This may affect staff associated with it.')) {
-      await deleteDoc(doc(db, 'shifts', id));
+      await supabase.from('shifts').delete().eq('id', id);
+      fetchShifts();
     }
   };
 
@@ -67,7 +94,11 @@ export const SettingsManager: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-8"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main flex items-center gap-2">
@@ -90,8 +121,14 @@ export const SettingsManager: React.FC = () => {
               <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">Company Work Shifts</h2>
             </div>
             <div className="divide-y divide-border-main">
-              {shifts.map((shift) => (
-                <div key={shift.id} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors">
+              {shifts.map((shift, idx) => (
+                <motion.div 
+                  key={shift.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center text-brand-indigo">
                       <Clock className="w-5 h-5" />
@@ -122,7 +159,7 @@ export const SettingsManager: React.FC = () => {
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
-                </div>
+                </motion.div>
               ))}
               {shifts.length === 0 && !loading && (
                 <div className="p-12 text-center text-gray-500">
@@ -160,7 +197,6 @@ export const SettingsManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -263,6 +299,6 @@ export const SettingsManager: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 };

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from './AuthProvider';
-import { db } from '../firebase';
-import { collection, query, where, onSnapshot, getDocs, setDoc, doc, addDoc, getDoc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Users, CalendarCheck, Palmtree, CreditCard, TrendingUp, Clock, Camera, Zap, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -29,14 +28,24 @@ export const Dashboard: React.FC = () => {
   const [isEditingAnnouncement, setIsEditingAnnouncement] = useState(false);
   const [announcementForm, setAnnouncementForm] = useState({ text: '', author: '' });
 
+  const fetchAnnouncement = async () => {
+    const { data } = await supabase.from('settings').select('*').eq('id', 'announcement').single();
+    if (data) {
+      setAnnouncement({ text: data.value.text, author: data.value.author });
+      setAnnouncementForm({ text: data.value.text, author: data.value.author });
+    }
+  };
+
   const saveAnnouncement = async () => {
     try {
-      await setDoc(doc(db, 'settings', 'announcement'), announcementForm);
+      await supabase.from('settings').upsert({ id: 'announcement', value: announcementForm });
       setIsEditingAnnouncement(false);
+      fetchAnnouncement();
     } catch (error) {
       console.error("Error saving announcement:", error);
     }
   };
+
   const handleFaceClockIn = async () => {
     if (!profile?.staffId) return;
     setIsScanning(true);
@@ -48,23 +57,25 @@ export const Dashboard: React.FC = () => {
     const now = format(new Date(), 'HH:mm');
     
     try {
-      // Check if attendance already exists for today
-      const atRef = collection(db, 'attendance');
-      const q = query(atRef, where('staffId', '==', profile.staffId), where('date', '==', today));
-      const snap = await getDocs(q);
+      const { data: existing } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('staff_id', profile.staffId)
+        .eq('date', today)
+        .single();
       
-      if (!snap.empty) {
+      if (existing) {
         alert("Attendance already marked for today!");
       } else {
-        await addDoc(collection(db, 'attendance'), {
-          staffId: profile.staffId,
-          staffName: profile.displayName,
+        await supabase.from('attendance').insert([{
+          staff_id: profile.staffId,
+          staff_name: profile.displayName,
           date: today,
           status: 'Present',
-          checkIn: now,
-          aiVerified: true,
-          lastUpdated: new Date().toISOString()
-        });
+          check_in: now,
+          ai_verified: true,
+          last_updated: new Date().toISOString()
+        }]);
         alert(`Success! Identity Verified with 99.9% confidence. Clocked in at ${now}`);
       }
     } catch (error) {
@@ -78,60 +89,63 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (!profile) return;
+    fetchAnnouncement();
 
-    // Fetch Announcement
-    const unsubAnnouncement = onSnapshot(doc(db, 'settings', 'announcement'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setAnnouncement({ text: data.text, author: data.author });
-        setAnnouncementForm({ text: data.text, author: data.author });
+    const fetchStats = async () => {
+      if (isAdmin) {
+        // Admin Stats
+        const { count: totalStaff } = await supabase.from('staff').select('*', { count: 'exact', head: true });
+        
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const { data: todayAttendance } = await supabase.from('attendance').select('*').eq('date', today);
+        
+        const present = todayAttendance?.filter(a => a.status === 'Present' || a.status === 'Half Day').length || 0;
+        const absent = todayAttendance?.filter(a => a.status === 'Absent').length || 0;
+
+        const { count: pendingLeaves } = await supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending');
+
+        setStats({
+          totalStaff: totalStaff || 0,
+          presentToday: present,
+          absentToday: absent,
+          pendingLeaves: pendingLeaves || 0,
+          totalPayroll: 0
+        });
+      } else if (profile.staffId) {
+        // Staff Stats
+        const startOfMonthDate = format(new Date(), 'yyyy-MM-01');
+        const { count: attendanceCount } = await supabase
+          .from('attendance')
+          .select('*', { count: 'exact', head: true })
+          .eq('staff_id', profile.staffId)
+          .gte('date', startOfMonthDate);
+
+        const { count: pendingCount } = await supabase
+          .from('leaves')
+          .select('*', { count: 'exact', head: true })
+          .eq('staff_id', profile.staffId)
+          .eq('status', 'Pending');
+
+        setPersonalStats(prev => ({
+          ...prev,
+          attendanceThisMonth: attendanceCount || 0,
+          pendingLeaves: pendingCount || 0
+        }));
       }
-    });
+    };
 
-    if (isAdmin) {
-      // Admin Stats
-      const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-        setStats(prev => ({ ...prev, totalStaff: snap.size }));
-      });
+    fetchStats();
 
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const unsubAttendance = onSnapshot(query(collection(db, 'attendance'), where('date', '==', today)), (snap) => {
-        const present = snap.docs.filter(d => d.data().status === 'Present' || d.data().status === 'Half Day').length;
-        const absent = snap.docs.filter(d => d.data().status === 'Absent').length;
-        setStats(prev => ({ ...prev, presentToday: present, absentToday: absent }));
-      });
+    // Subscribe to changes
+    const channels = [
+      supabase.channel('dashboard_staff').on('postgres_changes' as any, { event: '*', table: 'staff' }, fetchStats).subscribe(),
+      supabase.channel('dashboard_attendance').on('postgres_changes' as any, { event: '*', table: 'attendance' }, fetchStats).subscribe(),
+      supabase.channel('dashboard_leaves').on('postgres_changes' as any, { event: '*', table: 'leaves' }, fetchStats).subscribe()
+    ];
 
-      const unsubLeaves = onSnapshot(query(collection(db, 'leaves'), where('status', '==', 'Pending')), (snap) => {
-        setStats(prev => ({ ...prev, pendingLeaves: snap.size }));
-      });
-
-      return () => {
-        unsubStaff();
-        unsubAttendance();
-        unsubLeaves();
-      };
-    } else if (profile.staffId) {
-      // Staff Stats
-      const startOfMonth = format(new Date(), 'yyyy-MM-01');
-      const unsubAttendance = onSnapshot(
-        query(collection(db, 'attendance'), where('staffId', '==', profile.staffId), where('date', '>=', startOfMonth)),
-        (snap) => {
-          setPersonalStats(prev => ({ ...prev, attendanceThisMonth: snap.size }));
-        }
-      );
-
-      const unsubLeaves = onSnapshot(
-        query(collection(db, 'leaves'), where('staffId', '==', profile.staffId), where('status', '==', 'Pending')),
-        (snap) => {
-          setPersonalStats(prev => ({ ...prev, pendingLeaves: snap.size }));
-        }
-      );
-
-      return () => {
-        unsubAttendance();
-        unsubLeaves();
-      };
-    }
+    return () => {
+      channels.forEach(channel => supabase.removeChannel(channel));
+    };
   }, [isAdmin, profile]);
 
   const StatCard = ({ title, value, icon, color }: any) => (
@@ -203,7 +217,6 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Face Scan Modal Placeholder */}
         <AnimatePresence>
           {isFaceScanOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -235,7 +248,6 @@ export const Dashboard: React.FC = () => {
                       <div className="absolute inset-0 flex items-center justify-center text-white/50 text-xs font-mono">
                          [ ACCESSING CAMERA ]
                       </div>
-                      {/* Scanning Line Animation */}
                       <motion.div 
                         animate={{ top: ['0%', '100%', '0%'] }}
                         transition={{ duration: 3, repeat: Infinity, ease: "linear" }}

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, where, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Payroll, Staff, Attendance } from '../types';
 import { useAuth } from './AuthProvider';
 import { CreditCard, Plus, Search, CheckCircle2, AlertCircle, Download, FileText } from 'lucide-react';
@@ -27,25 +26,67 @@ export const PayrollManager: React.FC = () => {
   };
 
   useEffect(() => {
-    const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-      setStaffList(snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff)));
-    });
+    fetchStaff();
+    fetchPayroll();
 
-    const payrollRef = collection(db, 'payroll');
-    const q = isAdmin 
-      ? query(payrollRef, where('month', '==', selectedMonth))
-      : query(payrollRef, where('staffId', '==', profile?.staffId || 'none'), where('month', '==', selectedMonth));
-
-    const unsubPayroll = onSnapshot(q, (snap) => {
-      setPayrollList(snap.docs.map(d => ({ id: d.id, ...d.data() } as Payroll)));
-      setLoading(false);
-    });
+    const payrollSubscription = supabase
+      .channel('payroll_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'payroll', filter: `month=eq.${selectedMonth}` }, () => {
+        fetchPayroll();
+      })
+      .subscribe();
 
     return () => {
-      unsubStaff();
-      unsubPayroll();
+      supabase.removeChannel(payrollSubscription);
     };
   }, [profile, isAdmin, selectedMonth]);
+
+  const fetchStaff = async () => {
+    const { data } = await supabase.from('staff').select('*');
+    if (data) {
+      setStaffList(data.map(m => ({
+        id: m.id,
+        staffId: m.staff_id,
+        fullName: m.full_name,
+        email: m.email,
+        phoneNumber: m.phone_number,
+        role: m.role,
+        joiningDate: m.joining_date,
+        salaryType: m.salary_type,
+        salaryAmount: m.salary_amount,
+        workShift: m.work_shift,
+        isAdmin: m.is_admin,
+        pin: m.pin
+      })));
+    }
+  };
+
+  const fetchPayroll = async () => {
+    let query = supabase.from('payroll').select('*').eq('month', selectedMonth);
+    
+    if (!isAdmin) {
+      query = query.eq('staff_id', profile?.staffId || 'none');
+    }
+
+    const { data } = await query;
+    if (data) {
+      setPayrollList(data.map(m => ({
+        id: m.id,
+        staffId: m.staff_id,
+        staffName: m.staff_name,
+        month: m.month,
+        workingDays: m.working_days,
+        presentDays: m.present_days,
+        leavesTaken: m.leaves_taken,
+        finalSalary: m.final_salary,
+        bonus: m.bonus,
+        deductions: m.deductions,
+        status: m.status,
+        generatedAt: m.generated_at
+      })));
+    }
+    setLoading(false);
+  };
 
   const generatePayroll = async () => {
     if (!isAdmin) return;
@@ -59,33 +100,31 @@ export const PayrollManager: React.FC = () => {
       const end = format(endOfMonth(baseDate), 'yyyy-MM-dd');
 
       for (const staff of staffList) {
-        // ... (existing find check)
-        const existing = payrollList.find(p => p.staffId === staff.id);
+        const existing = payrollList.find(p => p.staffId === staff.staffId);
         if (existing) continue;
 
-        // ...
-        const atSnap = await getDocs(query(
-          collection(db, 'attendance'), 
-          where('staffId', '==', staff.id),
-          where('date', '>=', start),
-          where('date', '<=', end)
-        ));
+        const { data: attendances } = await supabase
+          .from('attendance')
+          .select('*')
+          .eq('staff_id', staff.staffId)
+          .gte('date', start)
+          .lte('date', end);
 
-        const attendances = atSnap.docs.map(d => d.data() as Attendance);
-        const presentDays = attendances.filter(a => a.status === 'Present').length;
-        const halfDays = attendances.filter(a => a.status === 'Half Day').length;
-        const leaveDays = attendances.filter(a => a.status === 'Leave').length;
+        if (!attendances) continue;
+
+        const presentDaysCount = attendances.filter(a => a.status === 'Present').length;
+        const halfDaysCount = attendances.filter(a => a.status === 'Half Day').length;
+        const leaveDaysCount = attendances.filter(a => a.status === 'Leave').length;
         
-        const effectiveDays = presentDays + (halfDays * 0.5);
+        const effectiveDays = presentDaysCount + (halfDaysCount * 0.5);
         
         const totalWorkDaysInMonth = eachDayOfInterval({
           start: startOfMonth(baseDate),
           end: endOfMonth(baseDate)
-        }).filter(d => d.getDay() !== 0).length; // Excluding Sundays
+        }).filter(d => d.getDay() !== 0).length;
 
         let finalSalary = staff.salaryAmount;
         if (staff.salaryType === 'Monthly') {
-           // Pro-rata if they missed days (simplified)
            if (effectiveDays < totalWorkDaysInMonth) {
              finalSalary = Math.round((staff.salaryAmount / totalWorkDaysInMonth) * effectiveDays);
            }
@@ -93,20 +132,21 @@ export const PayrollManager: React.FC = () => {
           finalSalary = staff.salaryAmount * effectiveDays;
         }
 
-        await addDoc(collection(db, 'payroll'), {
-          staffId: staff.id,
-          staffName: staff.fullName,
+        await supabase.from('payroll').insert([{
+          staff_id: staff.staffId,
+          staff_name: staff.fullName,
           month: selectedMonth,
-          workingDays: totalWorkDaysInMonth,
-          presentDays: effectiveDays,
-          leavesTaken: leaveDays,
-          finalSalary,
+          working_days: totalWorkDaysInMonth,
+          present_days: effectiveDays,
+          leaves_taken: leaveDaysCount,
+          final_salary: finalSalary,
           bonus: 0,
           deductions: 0,
           status: 'Pending',
-          generatedAt: new Date().toISOString(),
-        });
+          generated_at: new Date().toISOString(),
+        }]);
       }
+      fetchPayroll();
     } catch (error) {
       console.error('Error generating payroll:', error);
     } finally {
@@ -115,11 +155,16 @@ export const PayrollManager: React.FC = () => {
   };
 
   const markAsPaid = async (id: string) => {
-    await updateDoc(doc(db, 'payroll', id), { status: 'Paid' });
+    await supabase.from('payroll').update({ status: 'Paid' }).eq('id', id);
+    fetchPayroll();
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main">{isAdmin ? 'Payroll System' : 'My Salary Slips'}</h1>
@@ -146,11 +191,12 @@ export const PayrollManager: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {payrollList.map((pay) => (
+        {payrollList.map((pay, idx) => (
           <motion.div 
             layout
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: idx * 0.05 }}
             key={pay.id}
             className="bg-white p-6 rounded-xl border border-border-main shadow-sm relative group"
           >
@@ -215,6 +261,6 @@ export const PayrollManager: React.FC = () => {
           </p>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

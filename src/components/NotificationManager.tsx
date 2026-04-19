@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, query, where, orderBy, onSnapshot, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Notification } from '../types';
 import { useAuth } from './AuthProvider';
 import { Bell, BellOff, CheckCircle2, Clock, Trash2, ExternalLink, Inbox } from 'lucide-react';
@@ -17,40 +16,64 @@ export const NotificationManager: React.FC = () => {
 
   useEffect(() => {
     if (!profile?.uid) return;
+    fetchNotifications();
 
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', '==', profile.uid),
-      orderBy('createdAt', 'desc')
-    );
+    const notifSubscription = supabase
+      .channel('notif_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'notifications', filter: `user_id=eq.${profile.uid}` }, () => {
+        fetchNotifications();
+      })
+      .subscribe();
 
-    const unsub = onSnapshot(q, (snap) => {
-      setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Notification)));
-      setLoading(false);
-    });
-
-    return unsub;
+    return () => {
+      supabase.removeChannel(notifSubscription);
+    };
   }, [profile]);
+
+  const fetchNotifications = async () => {
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', profile?.uid)
+      .order('created_at', { ascending: false });
+
+    if (data) {
+      setNotifications(data.map(m => ({
+        id: m.id,
+        userId: m.user_id,
+        message: m.message,
+        details: m.details,
+        type: m.type,
+        read: m.read,
+        link: m.link,
+        createdAt: m.created_at
+      })));
+    }
+    setLoading(false);
+  };
 
   const markAsRead = async (id: string) => {
     try {
-      await updateDoc(doc(db, 'notifications', id), { read: true });
+      await supabase.from('notifications').update({ read: true }).eq('id', id);
+      fetchNotifications();
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
   };
 
   const markAllAsRead = async () => {
-    const batch = writeBatch(db);
-    notifications.filter(n => !n.read).forEach(n => {
-      batch.update(doc(db, 'notifications', n.id), { read: true });
-    });
-    await batch.commit();
+    try {
+      await supabase.from('notifications').update({ read: true }).eq('user_id', profile?.uid).eq('read', false);
+      fetchNotifications();
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
   };
 
   const deleteNotification = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'notifications', id));
+      await supabase.from('notifications').delete().eq('id', id);
+      fetchNotifications();
     } catch (error) {
       console.error('Error deleting notification:', error);
     }
@@ -66,7 +89,11 @@ export const NotificationManager: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="space-y-6"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main">Notifications</h1>
@@ -84,12 +111,13 @@ export const NotificationManager: React.FC = () => {
 
       <div className="space-y-3">
         <AnimatePresence mode="popLayout">
-          {notifications.map((notif) => (
+          {notifications.map((notif, idx) => (
             <motion.div
               layout
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ delay: idx * 0.03 }}
               key={notif.id}
               className={cn(
                 "group relative bg-white p-4 rounded-xl border transition-all flex items-start gap-4",
@@ -161,6 +189,6 @@ export const NotificationManager: React.FC = () => {
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 };

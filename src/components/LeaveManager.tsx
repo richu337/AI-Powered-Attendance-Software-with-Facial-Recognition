@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { LeaveRequest, LeaveType, LeaveStatus, Staff } from '../types';
 import { useAuth } from './AuthProvider';
 import { Palmtree, Plus, Clock, CheckCircle2, XCircle, Search, Calendar, User as UserIcon, X } from 'lucide-react';
@@ -37,55 +36,105 @@ export const LeaveManager: React.FC = () => {
 
   useEffect(() => {
     if (!profile) return;
+    fetchLeaves();
+    fetchMyStaffRecord();
 
-    const leaveRef = collection(db, 'leaves');
-    const q = isAdmin 
-      ? query(leaveRef, orderBy('appliedAt', 'desc'))
-      : query(leaveRef, where('staffId', '==', profile.staffId || 'none'), orderBy('appliedAt', 'desc'));
+    const leaveSubscription = supabase
+      .channel('leave_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'leaves' }, () => {
+        fetchLeaves();
+      })
+      .subscribe();
 
-    const unsub = onSnapshot(q, (snap) => {
-      setLeaves(snap.docs.map(d => ({ id: d.id, ...d.data() } as LeaveRequest)));
-      setLoading(false);
-    });
+    return () => {
+      supabase.removeChannel(leaveSubscription);
+    };
+  }, [profile, isAdmin]);
 
-    if (!isAdmin && profile.staffId) {
-      onSnapshot(doc(db, 'staff', profile.staffId), (snap) => {
-        if (snap.exists()) setMyStaffRecord(snap.data() as Staff);
-      });
+  const fetchLeaves = async () => {
+    let query = supabase.from('leaves').select('*').order('applied_at', { ascending: false });
+    
+    if (!isAdmin) {
+      query = query.eq('staff_id', profile?.staffId || 'none');
     }
 
-    return unsub;
-  }, [profile, isAdmin]);
+    const { data } = await query;
+    if (data) {
+      setLeaves(data.map(m => ({
+        id: m.id,
+        staffId: m.staff_id,
+        staffName: m.staff_name,
+        leaveType: m.leave_type,
+        startDate: m.start_date,
+        endDate: m.end_date,
+        reason: m.reason,
+        status: m.status,
+        appliedAt: m.applied_at,
+        rejectionReason: m.rejection_reason
+      })));
+    }
+    setLoading(false);
+  };
+
+  const fetchMyStaffRecord = async () => {
+    if (!isAdmin && profile?.staffId) {
+      const { data } = await supabase.from('staff').select('*').eq('staff_id', profile.staffId).single();
+      if (data) {
+        setMyStaffRecord({
+          id: data.id,
+          staffId: data.staff_id,
+          fullName: data.full_name,
+          email: data.email,
+          phoneNumber: data.phone_number,
+          role: data.role,
+          joiningDate: data.joining_date,
+          salaryType: data.salary_type,
+          salaryAmount: data.salary_amount,
+          workShift: data.work_shift,
+          isAdmin: data.is_admin,
+          pin: data.pin
+        });
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.staffId && !isAdmin) return;
     
     try {
-      const leaveDoc = await addDoc(collection(db, 'leaves'), {
-        staffId: profile?.staffId,
-        staffName: myStaffRecord?.fullName || profile?.displayName,
-        ...form,
+      const payload = {
+        staff_id: profile?.staffId,
+        staff_name: myStaffRecord?.fullName || profile?.displayName,
+        leave_type: form.leaveType,
+        start_date: form.startDate,
+        end_date: form.endDate,
+        reason: form.reason,
         status: 'Pending',
-        appliedAt: new Date().toISOString(),
-      });
+        applied_at: new Date().toISOString(),
+      };
+
+      await supabase.from('leaves').insert([payload]);
 
       // Notify Admins
-      const adminsSnap = await getDocs(query(collection(db, 'staff'), where('isAdmin', '==', true)));
-      adminsSnap.docs.forEach(adminDoc => {
-        const adminData = adminDoc.data() as Staff;
-        if (adminData.userId) {
-          addDoc(collection(db, 'notifications'), {
-            userId: adminData.userId,
+      const { data: admins } = await supabase.from('staff').select('user_id').eq('is_admin', true);
+      if (admins) {
+        const notifications = admins
+          .filter(a => a.user_id)
+          .map(admin => ({
+            user_id: admin.user_id,
             message: `New Leave Request from ${myStaffRecord?.fullName || profile?.displayName}`,
             details: `${form.leaveType} Leave: ${form.startDate} to ${form.endDate}`,
             type: 'leave_request',
             read: false,
-            createdAt: new Date().toISOString(),
+            created_at: new Date().toISOString(),
             link: '/leaves'
-          });
+          }));
+        
+        if (notifications.length > 0) {
+          await supabase.from('notifications').insert(notifications);
         }
-      });
+      }
 
       setIsModalOpen(false);
       setForm({
@@ -94,6 +143,7 @@ export const LeaveManager: React.FC = () => {
         endDate: format(new Date(), 'yyyy-MM-dd'),
         reason: '',
       });
+      fetchLeaves();
     } catch (error) {
       console.error('Error submitting leave:', error);
     }
@@ -102,34 +152,31 @@ export const LeaveManager: React.FC = () => {
   const handleAction = async (id: string, status: LeaveStatus, reason?: string) => {
     try {
       const updateData: any = { status };
-      if (reason) updateData.rejectionReason = reason;
+      if (reason) updateData.rejection_reason = reason;
       
-      await updateDoc(doc(db, 'leaves', id), updateData);
+      await supabase.from('leaves').update(updateData).eq('id', id);
 
       // Notify staff member
       const leave = leaves.find(l => l.id === id);
       if (leave && leave.staffId) {
-        // Find staff's userId
-        const staffSnap = await getDocs(query(collection(db, 'staff'), where('id', '==', leave.staffId)));
-        if (!staffSnap.empty) {
-          const staffData = staffSnap.docs[0].data() as Staff;
-          if (staffData.userId) {
-            addDoc(collection(db, 'notifications'), {
-              userId: staffData.userId,
-              message: `Your leave request was ${status.toLowerCase()}`,
-              details: reason ? `Reason: ${reason}` : `Your ${leave.leaveType} leave has been ${status.toLowerCase()}.`,
-              type: 'leave_status_update',
-              read: false,
-              createdAt: new Date().toISOString(),
-              link: '/leaves'
-            });
-          }
+        const { data: staff } = await supabase.from('staff').select('user_id').eq('staff_id', leave.staffId).single();
+        if (staff?.user_id) {
+          await supabase.from('notifications').insert([{
+            user_id: staff.user_id,
+            message: `Your leave request was ${status.toLowerCase()}`,
+            details: reason ? `Reason: ${reason}` : `Your ${leave.leaveType} leave has been ${status.toLowerCase()}.`,
+            type: 'leave_status_update',
+            read: false,
+            created_at: new Date().toISOString(),
+            link: '/leaves'
+          }]);
         }
       }
 
       setIsRejectModalOpen(false);
       setSelectedLeaveId(null);
       setRejectionReason('');
+      fetchLeaves();
     } catch (error) {
       console.error('Error updating leave status:', error);
     }
@@ -150,7 +197,11 @@ export const LeaveManager: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main">Leave Management</h1>
@@ -169,12 +220,13 @@ export const LeaveManager: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {leaves.map((leave) => (
+        {leaves.map((leave, idx) => (
           <motion.div 
             layout
+            key={leave.id}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            key={leave.id}
+            transition={{ delay: idx * 0.05 }}
             className="bg-white p-5 rounded-xl border border-border-main shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6"
           >
             <div className="flex items-start gap-4">
@@ -331,7 +383,7 @@ export const LeaveManager: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-      {/* Modal Rejection Reason */}
+
       <AnimatePresence>
         {isRejectModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -392,6 +444,6 @@ export const LeaveManager: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 };

@@ -11,7 +11,8 @@ export interface UserProfile {
 export type SalaryType = 'Monthly' | 'Daily' | 'Hourly';
 
 export interface Staff {
-  id: string;
+  id: string; // Internal UUID
+  staffId: string; // Human readable ID (e.g. S-001)
   fullName: string;
   phoneNumber: string;
   email: string;
@@ -22,13 +23,15 @@ export interface Staff {
   workShift: string;
   userId?: string;
   isAdmin?: boolean;
+  pin?: string; // For clocking in without Google
+  faceEmbedding?: number[]; // For Python face recognition
 }
 
 export type AttendanceStatus = 'Present' | 'Absent' | 'Half Day' | 'Leave';
 
 export interface Attendance {
   id: string;
-  staffId: string;
+  staffId: string; // Human readable ID or Internal ID link
   staffName: string;
   date: string;
   status: AttendanceStatus;
@@ -36,6 +39,7 @@ export interface Attendance {
   checkOut?: string;
   notes?: string;
   aiVerified?: boolean;
+  faceMatchScore?: number; // Score from Python
   overtimeMinutes?: number;
 }
 

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { Staff, SalaryType, Shift } from '../types';
-import { Plus, Search, MoreVertical, Edit2, Trash2, X, Check, Shield } from 'lucide-react';
+import { Plus, Search, MoreVertical, Edit2, Trash2, X, Check, Shield, Key } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -16,6 +15,7 @@ export const StaffManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const initialForm = {
+    staffId: '',
     fullName: '',
     phoneNumber: '',
     email: '',
@@ -25,37 +25,84 @@ export const StaffManager: React.FC = () => {
     salaryAmount: 0,
     workShift: 'Full Day',
     isAdmin: false,
+    pin: '',
   };
 
   const [form, setForm] = useState(initialForm);
 
   useEffect(() => {
-    const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-      setStaffList(snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff)));
-      setLoading(false);
-    });
+    fetchStaff();
+    fetchShifts();
 
-    const unsubShifts = onSnapshot(collection(db, 'shifts'), (snap) => {
-      setShifts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Shift)));
-    });
+    // Set up real-time listener
+    const staffSubscription = supabase
+      .channel('staff_changes')
+      .on('postgres_changes' as any, { event: '*', table: 'staff' }, () => {
+        fetchStaff();
+      })
+      .subscribe();
 
     return () => {
-      unsubStaff();
-      unsubShifts();
+      supabase.removeChannel(staffSubscription);
     };
   }, []);
 
+  const fetchStaff = async () => {
+    const { data, error } = await supabase
+      .from('staff')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setStaffList(data.map(m => ({
+        id: m.id,
+        staffId: m.staff_id,
+        fullName: m.full_name,
+        email: m.email,
+        phoneNumber: m.phone_number,
+        role: m.role,
+        joiningDate: m.joining_date,
+        salaryType: m.salary_type,
+        salaryAmount: m.salary_amount,
+        workShift: m.work_shift,
+        isAdmin: m.is_admin,
+        pin: m.pin
+      })));
+    }
+    setLoading(false);
+  };
+
+  const fetchShifts = async () => {
+    const { data } = await supabase.from('shifts').select('*');
+    if (data) setShifts(data);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const payload = {
+      staff_id: form.staffId,
+      full_name: form.fullName,
+      phone_number: form.phoneNumber,
+      email: form.email || null,
+      role: form.role,
+      joining_date: form.joiningDate,
+      salary_type: form.salaryType,
+      salary_amount: form.salaryAmount,
+      work_shift: form.workShift,
+      is_admin: form.isAdmin,
+      pin: form.pin || null,
+    };
+
     try {
       if (editingStaff) {
-        await updateDoc(doc(db, 'staff', editingStaff.id), form);
+        await supabase.from('staff').update(payload).eq('id', editingStaff.id);
       } else {
-        await addDoc(collection(db, 'staff'), form);
+        await supabase.from('staff').insert([payload]);
       }
       setIsModalOpen(false);
       setEditingStaff(null);
       setForm(initialForm);
+      fetchStaff();
     } catch (error) {
       console.error('Error saving staff:', error);
     }
@@ -63,25 +110,36 @@ export const StaffManager: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this staff member?')) {
-      await deleteDoc(doc(db, 'staff', id));
+      await supabase.from('staff').delete().eq('id', id);
+      fetchStaff();
     }
+  };
+
+  const generateId = () => {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    setForm({ ...form, staffId: `S-${num}` });
   };
 
   const filteredStaff = staffList.filter(s => 
     s.fullName.toLowerCase().includes(search.toLowerCase()) || 
-    s.email.toLowerCase().includes(search.toLowerCase()) ||
-    s.role.toLowerCase().includes(search.toLowerCase())
+    (s.email && s.email.toLowerCase().includes(search.toLowerCase())) ||
+    s.role.toLowerCase().includes(search.toLowerCase()) ||
+    s.staffId.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-main">Staff Members</h1>
           <p className="text-sm text-text-muted mt-1">Manage your team and their details.</p>
         </div>
         <button 
-          onClick={() => { setEditingStaff(null); setForm(initialForm); setIsModalOpen(true); }}
+          onClick={() => { setEditingStaff(null); setForm(initialForm); generateId(); setIsModalOpen(true); }}
           className="flex items-center justify-center gap-2 bg-brand-indigo text-white px-5 py-2.5 rounded-lg font-semibold shadow-sm hover:opacity-90 transition-all active:scale-95 text-sm"
         >
           <Plus className="w-4 h-4" /> Add Staff
@@ -94,7 +152,7 @@ export const StaffManager: React.FC = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted w-4 h-4" />
             <input 
               type="text" 
-              placeholder="Search staff..."
+              placeholder="Search staff, ID or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-white border border-border-main rounded-lg text-sm focus:ring-1 focus:ring-brand-indigo outline-none transition-all placeholder:text-text-muted"
@@ -107,6 +165,7 @@ export const StaffManager: React.FC = () => {
             <thead>
               <tr className="bg-[#F9FAFB] text-text-muted text-[11px] uppercase tracking-wider">
                 <th className="px-6 py-3 font-bold border-b border-border-main">Staff Member</th>
+                <th className="px-6 py-3 font-bold border-b border-border-main text-center">ID</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Position</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Joining Date</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Salary</th>
@@ -115,8 +174,14 @@ export const StaffManager: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-main">
-              {filteredStaff.map((staff) => (
-                <tr key={staff.id} className="hover:bg-gray-50 transition-colors group">
+              {filteredStaff.map((staff, idx) => (
+                <motion.tr 
+                  key={staff.id}
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.03 }}
+                  className="hover:bg-gray-50 transition-colors group"
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-indigo-50 rounded-full flex items-center justify-center text-brand-indigo font-bold text-xs uppercase relative">
@@ -129,9 +194,14 @@ export const StaffManager: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-[13px] font-semibold text-text-main">{staff.fullName}</p>
-                        <p className="text-[11px] text-text-muted">{staff.email}</p>
+                        <p className="text-[11px] text-text-muted">{staff.email || 'No Email'}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    <span className="text-[11px] font-mono font-bold bg-gray-100 px-2 py-0.5 rounded text-gray-600">
+                      {staff.staffId}
+                    </span>
                   </td>
                   <td className="px-6 py-4">
                     <span className="px-3 py-1 bg-indigo-50 text-brand-indigo rounded-full text-[11px] font-bold uppercase tracking-wider">
@@ -160,11 +230,11 @@ export const StaffManager: React.FC = () => {
                       </button>
                     </div>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
               {filteredStaff.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                     No staff members found.
                   </td>
                 </tr>
@@ -204,6 +274,40 @@ export const StaffManager: React.FC = () => {
               <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Staff ID</label>
+                    <div className="flex gap-2">
+                       <input 
+                         required
+                         type="text" 
+                         value={form.staffId}
+                         onChange={(e) => setForm({...form, staffId: e.target.value})}
+                         className="flex-1 px-4 py-2.5 bg-gray-50 border border-border-main rounded-lg text-sm font-bold font-mono outline-none"
+                         placeholder="e.g. S-001"
+                       />
+                       <button 
+                         type="button"
+                         onClick={generateId}
+                         className="px-3 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                       >
+                         Auto
+                       </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Security PIN</label>
+                    <div className="relative">
+                       <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+                       <input 
+                         type="text" 
+                         maxLength={4}
+                         placeholder="4-digit PIN"
+                         value={form.pin}
+                         onChange={(e) => setForm({...form, pin: e.target.value.replace(/\D/g, '')})}
+                         className="w-full pl-10 pr-4 py-2.5 bg-white border border-border-main rounded-lg text-sm font-bold tracking-widest outline-none"
+                       />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Full Name</label>
                     <input 
                       required
@@ -216,7 +320,6 @@ export const StaffManager: React.FC = () => {
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Email Address</label>
                     <input 
-                      required
                       type="email" 
                       value={form.email}
                       onChange={(e) => setForm({...form, email: e.target.value})}
@@ -283,7 +386,7 @@ export const StaffManager: React.FC = () => {
                     >
                       <option value="">Select Shift</option>
                       {shifts.map(s => (
-                        <option key={s.id} value={s.name}>{s.name} ({s.startTime}-{s.endTime})</option>
+                        <option key={s.id} value={s.name}>{s.name} ({s.start_time}-{s.end_time})</option>
                       ))}
                       {!shifts.length && (
                         <>
@@ -330,6 +433,6 @@ export const StaffManager: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 };

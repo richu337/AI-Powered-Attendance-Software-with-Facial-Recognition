@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
-import { auth } from '../firebase';
+import { supabase } from '../supabase';
 import { 
   BarChart3, 
   Users, 
@@ -11,31 +11,46 @@ import {
   LogOut, 
   Menu, 
   X,
-  User as UserIcon,
-  Shield,
   Bell,
   Settings
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile, isAdmin } = useAuth();
+  const { profile, isAdmin, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const navigate = useNavigate();
 
+  const fetchUnreadCount = async () => {
+    if (!profile?.uid) return;
+    const { count } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', profile.uid)
+      .eq('read', false);
+    setUnreadCount(count || 0);
+  };
+
   React.useEffect(() => {
     if (!profile?.uid) return;
-    const q = query(collection(db, 'notifications'), where('userId', '==', profile.uid), where('read', '==', false));
-    const unsub = onSnapshot(q, (snap) => setUnreadCount(snap.size));
-    return unsub;
+    fetchUnreadCount();
+
+    const notifSubscription = supabase
+      .channel('layout_notifs')
+      .on('postgres_changes' as any, { event: '*', table: 'notifications', filter: `user_id=eq.${profile.uid}` }, () => {
+        fetchUnreadCount();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(notifSubscription);
+    };
   }, [profile]);
 
-  const handleLogout = () => {
-    auth.signOut();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
   };
 
@@ -59,7 +74,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="min-h-screen bg-surface-main flex font-sans">
-      {/* Mobile Toggle */}
       <div className="lg:hidden fixed top-4 right-4 z-50">
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -69,7 +83,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </button>
       </div>
 
-      {/* Sidebar */}
       <AnimatePresence>
         {(isSidebarOpen || window.innerWidth >= 1024) && (
           <motion.aside 
@@ -136,7 +149,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
         <header className="fixed lg:static top-0 left-0 right-0 h-16 bg-white border-b border-border-main flex items-center justify-between px-8 z-30">
           <div className="font-semibold text-lg">

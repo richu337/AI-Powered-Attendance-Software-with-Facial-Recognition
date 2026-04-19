@@ -1,13 +1,14 @@
 import React from 'react';
-import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from '../firebase';
+import { useAuth } from './AuthProvider';
 import { motion } from 'motion/react';
 import { LogIn } from 'lucide-react';
 
 export const Login: React.FC = () => {
+  const { loginWithGoogle } = useAuth();
+
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      await loginWithGoogle();
     } catch (error) {
       console.error('Login Error:', error);
     }
