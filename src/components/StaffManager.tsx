@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 import { Staff, SalaryType, Shift } from '../types';
-import { Plus, Search, MoreVertical, Edit2, Trash2, X, Check, Shield, Key } from 'lucide-react';
+import { Plus, Search, MoreVertical, Edit2, Trash2, X, Check, Shield, Key, Camera, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import Webcam from 'react-webcam';
+import { getFaceEmbedding } from '../lib/face-recognition';
 
 export const StaffManager: React.FC = () => {
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
+  const [selectedStaffFace, setSelectedStaffFace] = useState<Staff | null>(null);
+  const [isEnrolling, setIsEnrolling] = useState(false);
+  const webcamRef = React.useRef<Webcam>(null);
+
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
   const initialForm = {
-    staffId: '',
     fullName: '',
     phoneNumber: '',
     email: '',
@@ -26,6 +32,7 @@ export const StaffManager: React.FC = () => {
     workShift: 'Full Day',
     isAdmin: false,
     pin: '',
+    password: '',
   };
 
   const [form, setForm] = useState(initialForm);
@@ -66,7 +73,8 @@ export const StaffManager: React.FC = () => {
         salaryAmount: m.salary_amount,
         workShift: m.work_shift,
         isAdmin: m.is_admin,
-        pin: m.pin
+        pin: m.pin,
+        password: m.password || ''
       })));
     }
     setLoading(false);
@@ -80,7 +88,7 @@ export const StaffManager: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
-      staff_id: form.staffId,
+      staff_id: form.email,
       full_name: form.fullName,
       phone_number: form.phoneNumber,
       email: form.email || null,
@@ -91,6 +99,7 @@ export const StaffManager: React.FC = () => {
       work_shift: form.workShift,
       is_admin: form.isAdmin,
       pin: form.pin || null,
+      password: form.password || null,
     };
 
     try {
@@ -120,11 +129,46 @@ export const StaffManager: React.FC = () => {
     setForm({ ...form, staffId: `S-${num}` });
   };
 
+  const handleRegisterFace = async () => {
+    if (!webcamRef.current || !selectedStaffFace) return;
+    
+    setIsEnrolling(true);
+    try {
+      const imageSrc = webcamRef.current.getScreenshot();
+      if (!imageSrc) throw new Error("Could not capture image");
+      
+      const embedding = await getFaceEmbedding(imageSrc);
+      
+      if (!embedding) {
+        alert("No face detected. Please ensure your face is clearly visible and within the frame.");
+        return;
+      }
+      
+      // Convert Float32Array to regular array for Supabase vector column
+      const embeddingArray = Array.from(embedding);
+      
+      const { error } = await supabase
+        .from('staff')
+        .update({ face_embedding: embeddingArray })
+        .eq('id', selectedStaffFace.id);
+        
+      if (error) throw error;
+      
+      alert(`Success! Facial biometric fingerprint has been successfully registered for ${selectedStaffFace.fullName}.`);
+      setIsFaceModalOpen(false);
+      fetchStaff();
+    } catch (error) {
+      console.error("Error registering face:", error);
+      alert("AI Registration failed. Please try again in better lighting.");
+    } finally {
+      setIsEnrolling(false);
+    }
+  };
+
   const filteredStaff = staffList.filter(s => 
     s.fullName.toLowerCase().includes(search.toLowerCase()) || 
     (s.email && s.email.toLowerCase().includes(search.toLowerCase())) ||
-    s.role.toLowerCase().includes(search.toLowerCase()) ||
-    s.staffId.toLowerCase().includes(search.toLowerCase())
+    s.role.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -139,7 +183,7 @@ export const StaffManager: React.FC = () => {
           <p className="text-sm text-text-muted mt-1">Manage your team and their details.</p>
         </div>
         <button 
-          onClick={() => { setEditingStaff(null); setForm(initialForm); generateId(); setIsModalOpen(true); }}
+          onClick={() => { setEditingStaff(null); setForm(initialForm); setIsModalOpen(true); }}
           className="flex items-center justify-center gap-2 bg-brand-indigo text-white px-5 py-2.5 rounded-lg font-semibold shadow-sm hover:opacity-90 transition-all active:scale-95 text-sm"
         >
           <Plus className="w-4 h-4" /> Add Staff
@@ -152,7 +196,7 @@ export const StaffManager: React.FC = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted w-4 h-4" />
             <input 
               type="text" 
-              placeholder="Search staff, ID or email..."
+              placeholder="Search staff, or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-white border border-border-main rounded-lg text-sm focus:ring-1 focus:ring-brand-indigo outline-none transition-all placeholder:text-text-muted"
@@ -165,7 +209,6 @@ export const StaffManager: React.FC = () => {
             <thead>
               <tr className="bg-[#F9FAFB] text-text-muted text-[11px] uppercase tracking-wider">
                 <th className="px-6 py-3 font-bold border-b border-border-main">Staff Member</th>
-                <th className="px-6 py-3 font-bold border-b border-border-main text-center">ID</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Position</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Joining Date</th>
                 <th className="px-6 py-3 font-bold border-b border-border-main">Salary</th>
@@ -198,11 +241,6 @@ export const StaffManager: React.FC = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="text-[11px] font-mono font-bold bg-gray-100 px-2 py-0.5 rounded text-gray-600">
-                      {staff.staffId}
-                    </span>
-                  </td>
                   <td className="px-6 py-4">
                     <span className="px-3 py-1 bg-indigo-50 text-brand-indigo rounded-full text-[11px] font-bold uppercase tracking-wider">
                       {staff.role}
@@ -216,6 +254,16 @@ export const StaffManager: React.FC = () => {
                   <td className="px-6 py-4 text-xs text-text-muted">{staff.workShift}</td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <button 
+                        title="Manage Biometrics"
+                        onClick={() => { setSelectedStaffFace(staff); setIsFaceModalOpen(true); }}
+                        className={cn(
+                          "p-1.5 rounded transition-all",
+                          staff.faceEmbedding ? "text-brand-success hover:bg-green-50" : "text-text-muted hover:text-brand-indigo hover:bg-indigo-50"
+                        )}
+                      >
+                        <Camera className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => { setEditingStaff(staff); setForm(staff); setIsModalOpen(true); }}
                         className="p-1.5 text-text-muted hover:text-brand-indigo hover:bg-indigo-50 rounded transition-all"
@@ -234,7 +282,7 @@ export const StaffManager: React.FC = () => {
               ))}
               {filteredStaff.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                     No staff members found.
                   </td>
                 </tr>
@@ -274,27 +322,22 @@ export const StaffManager: React.FC = () => {
               <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Staff ID</label>
-                    <div className="flex gap-2">
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Login Password</label>
+                    <div className="relative">
+                       <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
                        <input 
-                         required
+                         required={!editingStaff}
                          type="text" 
-                         value={form.staffId}
-                         onChange={(e) => setForm({...form, staffId: e.target.value})}
-                         className="flex-1 px-4 py-2.5 bg-gray-50 border border-border-main rounded-lg text-sm font-bold font-mono outline-none"
-                         placeholder="e.g. S-001"
+                         placeholder="Login password"
+                         value={form.password}
+                         onChange={(e) => setForm({...form, password: e.target.value})}
+                         className="w-full pl-10 pr-4 py-2.5 bg-white border border-border-main rounded-lg text-sm font-semibold outline-none"
                        />
-                       <button 
-                         type="button"
-                         onClick={generateId}
-                         className="px-3 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
-                       >
-                         Auto
-                       </button>
                     </div>
+                    <p className="text-[10px] text-text-muted italic">Provided to staff for logging into their account.</p>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Security PIN</label>
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Security PIN (Attendance)</label>
                     <div className="relative">
                        <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
                        <input 
@@ -318,13 +361,15 @@ export const StaffManager: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Email Address</label>
+                    <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Email Address (Login ID)</label>
                     <input 
                       type="email" 
+                      required
                       value={form.email}
                       onChange={(e) => setForm({...form, email: e.target.value})}
                       className="w-full px-4 py-2.5 bg-white border border-border-main rounded-lg text-sm focus:ring-1 focus:ring-brand-indigo outline-none"
                     />
+                    <p className="text-[10px] text-text-muted italic">Used by staff to log into their workspace.</p>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Phone Number</label>
@@ -429,6 +474,106 @@ export const StaffManager: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Face Registration Modal */}
+      <AnimatePresence>
+        {isFaceModalOpen && selectedStaffFace && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsFaceModalOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl relative z-10 overflow-hidden border border-white/20 flex flex-col"
+            >
+              <div className="p-8 border-b border-border-main flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-text-main">Biometric Enrollment</h2>
+                  <p className="text-xs text-text-tertiary font-medium uppercase tracking-widest mt-1">Registering: {selectedStaffFace.fullName}</p>
+                </div>
+                <button onClick={() => setIsFaceModalOpen(false)} className="p-2 text-text-muted hover:bg-gray-100 rounded-xl transition-all">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-8 flex flex-col items-center gap-8">
+                <div className="relative w-64 h-64 bg-slate-900 rounded-[2.5rem] overflow-hidden group shadow-2xl shadow-indigo-500/20">
+                    <Webcam
+                      audio={false}
+                      ref={webcamRef}
+                      screenshotFormat="image/jpeg"
+                      className="absolute inset-0 w-full h-full object-cover grayscale brightness-110 contrast-125"
+                      mirrored={false}
+                      screenshotQuality={1}
+                      imageSmoothing={true}
+                      forceScreenshotSourceSize={true}
+                      disablePictureInPicture={true}
+                      videoConstraints={{
+                        width: 400,
+                        height: 400,
+                        facingMode: "user"
+                      }}
+                      onUserMedia={() => {}}
+                      onUserMediaError={() => {}}
+                    />
+                    
+                    {/* Viewfinder Overlay */}
+                    <div className="absolute inset-0 border-[30px] border-slate-900/40 pointer-events-none" />
+                    <div className="absolute inset-x-12 inset-y-12 border-2 border-white/10 rounded-full border-dashed" />
+                    
+                    <motion.div 
+                      animate={{ top: ['0%', '100%', '0%'] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                      className="absolute h-[1px] w-full bg-brand-indigo/50 shadow-[0_0_15px_#6366f1] z-10"
+                    />
+
+                    {/* Dashboard Corners */}
+                    <div className="absolute top-6 left-6 w-5 h-5 border-t-2 border-l-2 border-brand-indigo rounded-sm" />
+                    <div className="absolute top-6 right-6 w-5 h-5 border-t-2 border-r-2 border-brand-indigo rounded-sm" />
+                    <div className="absolute bottom-6 left-6 w-5 h-5 border-b-2 border-l-2 border-brand-indigo rounded-sm" />
+                    <div className="absolute bottom-6 right-6 w-5 h-5 border-b-2 border-r-2 border-brand-indigo rounded-sm" />
+                </div>
+
+                <div className="text-center space-y-2 px-4">
+                  <h3 className="text-sm font-bold text-text-main">AI Nodal Point Analysis</h3>
+                  <p className="text-xs text-text-muted leading-relaxed">
+                    Position your face within the frame. Our AI will extract 128 unique biometric markers to generate your neural fingerprint.
+                  </p>
+                </div>
+
+                <div className="w-full flex gap-3">
+                  <button 
+                    onClick={() => setIsFaceModalOpen(false)}
+                    className="flex-1 py-3.5 rounded-xl font-bold text-xs text-text-muted border border-border-main hover:bg-gray-50 transition-all uppercase tracking-widest"
+                  >
+                    Dismiss
+                  </button>
+                  <button 
+                    disabled={isEnrolling}
+                    onClick={handleRegisterFace}
+                    className={cn(
+                      "flex-[2] py-3.5 rounded-xl font-bold text-xs shadow-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest active:scale-[0.98]",
+                      isEnrolling ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-brand-indigo text-white hover:bg-indigo-700 shadow-indigo-500/20"
+                    )}
+                  >
+                    {isEnrolling ? (
+                      <><Clock className="w-4 h-4 animate-spin" /> Analyzing...</>
+                    ) : (
+                      <><Check className="w-4 h-4" /> Finalize Print</>
+                    )}
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

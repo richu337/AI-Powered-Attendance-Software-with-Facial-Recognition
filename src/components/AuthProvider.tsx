@@ -8,7 +8,8 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   isAdmin: boolean;
-  loginWithGoogle: () => Promise<void>;
+  loginAdmin: (email: string, pass: string) => Promise<void>;
+  loginStaff: (email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -17,7 +18,8 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   isAdmin: false,
-  loginWithGoogle: async () => {},
+  loginAdmin: async () => {},
+  loginStaff: async () => {},
   logout: async () => {},
 });
 
@@ -28,24 +30,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loginWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
+  // Persistence for staff sessions
+  useEffect(() => {
+    const savedStaffProfile = localStorage.getItem('staff_profile');
+    if (savedStaffProfile) {
+      setProfile(JSON.parse(savedStaffProfile));
+      setLoading(false);
+    }
+  }, []);
+
+  const loginAdmin = async (email: string, pass: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) throw error;
+  };
+
+  const loginStaff = async (email: string, pass: string) => {
+    // Check the staff table by email
+    const { data, error } = await supabase
+      .from('staff')
+      .select('*')
+      .eq('email', email)
+      .eq('password', pass)
+      .single();
+
+    if (error || !data) {
+      throw new Error('Invalid Email or Password');
+    }
+
+    const staffProfile: UserProfile = {
+      uid: data.id,
+      email: data.email || '',
+      displayName: data.full_name,
+      role: data.is_admin ? 'admin' : 'staff',
+      staffId: data.staff_id,
+    };
+
+    setProfile(staffProfile);
+    localStorage.setItem('staff_profile', JSON.stringify(staffProfile));
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
+    setProfile(null);
+    localStorage.removeItem('staff_profile');
   };
 
   useEffect(() => {
-    // 1. Check current session
+    // 1. Check current supabase session (Admin)
     const getInitialSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      handleAuthChange(session);
+      if (session) handleAuthChange(session);
+      else if (!localStorage.getItem('staff_profile')) setLoading(false);
     };
 
     getInitialSession();
@@ -63,7 +98,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(currentUser);
 
     if (currentUser) {
-      // Fetch or create profile
+      // FORCE ADMIN FOR SPECIFIC EMAIL
+      const isMasterAdmin = currentUser.email?.toLowerCase().trim() === 'rayhanjaleel904@gmail.com';
+      
       const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
@@ -72,7 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!profileData && !error) {
         // Create new profile
-        const isAdminEmail = currentUser.email === 'rayhanjaleel904@gmail.com';
+        const isAdminEmail = currentUser.email?.toLowerCase().trim() === 'rayhanjaleel904@gmail.com';
         
         // Try to link with staff record by email if not exists
         let staffId: string | undefined;
@@ -82,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const { data: staffData } = await supabase
             .from('staff')
             .select('id, staff_id, is_admin')
-            .eq('email', currentUser.email)
+            .eq('email', currentUser.email.toLowerCase().trim())
             .single();
 
           if (staffData) {
@@ -126,8 +163,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isAdmin = profile?.role === 'admin' || 
+                  profile?.email?.toLowerCase().trim() === 'rayhanjaleel904@gmail.com' ||
+                  user?.email?.toLowerCase().trim() === 'rayhanjaleel904@gmail.com';
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin: profile?.role === 'admin', loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, loginAdmin, loginStaff, logout }}>
       {children}
     </AuthContext.Provider>
   );

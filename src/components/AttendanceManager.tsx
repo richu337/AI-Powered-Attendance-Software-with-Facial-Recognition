@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 import { Staff, Attendance, AttendanceStatus, Shift } from '../types';
 import { useAuth } from './AuthProvider';
-import { Calendar, CheckCircle2, XCircle, Clock, Save, ChevronLeft, ChevronRight, Shield, Camera } from 'lucide-react';
+import { Calendar, CheckCircle2, XCircle, Clock, Save, ChevronLeft, ChevronRight, Shield, Camera, MapPin } from 'lucide-react';
 import { format, addDays, subDays, parseISO, isValid } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { DayPicker } from 'react-day-picker';
@@ -94,6 +94,8 @@ export const AttendanceManager: React.FC = () => {
           status: m.status,
           checkIn: m.check_in,
           checkOut: m.check_out,
+          latitude: m.latitude,
+          longitude: m.longitude,
           notes: m.notes,
           aiVerified: m.ai_verified,
           faceMatchScore: m.face_match_score,
@@ -337,38 +339,44 @@ export const AttendanceManager: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="text-[13px] font-semibold text-text-main">{staff.fullName}</p>
-                          <span className="text-[10px] font-mono text-text-muted">({staff.staffId})</span>
                         </div>
                         <p className="text-[11px] text-text-muted">{staff.role}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      <StatusButton 
-                        staff={staff} 
-                        status="Present" 
-                        label="P" 
-                        color="bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]" 
-                      />
-                      <StatusButton 
-                        staff={staff} 
-                        status="Absent" 
-                        label="A" 
-                        color="bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]" 
-                      />
-                      <StatusButton 
-                        staff={staff} 
-                        status="Half Day" 
-                        label="H" 
-                        color="bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]" 
-                      />
-                      <StatusButton 
-                        staff={staff} 
-                        status="Leave" 
-                        label="L" 
-                        color="bg-indigo-50 text-brand-indigo border-indigo-200" 
-                      />
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex gap-2">
+                        <StatusButton 
+                          staff={staff} 
+                          status="Present" 
+                          label="P" 
+                          color="bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]" 
+                        />
+                        <StatusButton 
+                          staff={staff} 
+                          status="Absent" 
+                          label="A" 
+                          color="bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]" 
+                        />
+                        <StatusButton 
+                          staff={staff} 
+                          status="Half Day" 
+                          label="H" 
+                          color="bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]" 
+                        />
+                        <StatusButton 
+                          staff={staff} 
+                          status="Leave" 
+                          label="L" 
+                          color="bg-indigo-50 text-brand-indigo border-indigo-200" 
+                        />
+                      </div>
+                      {(attendance[staff.staffId]?.latitude || attendance[staff.staffId]?.longitude) && (
+                        <div className="flex items-center gap-1 text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded-lg text-[10px] animate-in fade-in zoom-in duration-300" title="Geographic Perimeter Verified">
+                           <MapPin className="w-3 h-3" /> Area OK
+                        </div>
+                      )}
                     </div>
                   </td>
                   {isAdmin && (
@@ -396,8 +404,15 @@ export const AttendanceManager: React.FC = () => {
                           </span>
                         </div>
                         {attendance[staff.staffId]?.aiVerified && (
-                          <div className="mt-1 flex items-center gap-1 text-green-600 font-bold bg-green-50 px-1.5 py-0.5 rounded w-fit">
-                             <Camera className="w-2.5 h-2.5" /> Face Verified
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <div className="flex items-center gap-1 text-green-600 font-bold bg-green-50 px-1.5 py-0.5 rounded w-fit capitalize">
+                               <Camera className="w-2.5 h-2.5" /> Face Verified
+                            </div>
+                            {(attendance[staff.staffId]?.latitude || attendance[staff.staffId]?.longitude) && (
+                              <div className="flex items-center gap-1 text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded w-fit">
+                                 <MapPin className="w-2.5 h-2.5" /> Area Verified
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

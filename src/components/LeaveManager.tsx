@@ -212,7 +212,7 @@ export const LeaveManager: React.FC = () => {
         {!isAdmin && (
           <button 
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 bg-brand-indigo text-white px-5 py-2.5 rounded-lg font-semibold shadow-sm hover:opacity-90 transition-all active:scale-95 text-sm"
+            className="flex items-center justify-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-lg font-bold shadow-sm hover:bg-black transition-all active:scale-95 text-sm"
           >
             <Plus className="w-4 h-4" /> Request Leave
           </button>

@@ -42,6 +42,7 @@ create table public.staff (
   work_shift text,
   is_admin boolean default false,
   pin text, -- For attendance tracking without login
+  password text, -- Added for direct login with Staff ID
   face_embedding vector(128), -- For matching face math (128 dimensions)
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -116,6 +117,14 @@ create table public.notifications (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+-- QR SESSIONS (For Dynamic Attendance QR)
+create table public.qr_sessions (
+  id text primary key, -- e.g., 'active_session'
+  token text not null,
+  expires_at timestamp with time zone not null,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 -- SECURITY RULES (Row Level Security)
 -- For now, allow everything to get started
 alter table public.profiles enable row level security;
@@ -141,6 +150,10 @@ create policy "Users can manage their own notifications" on public.notifications
 alter table public.shifts enable row level security;
 create policy "Everyone can view shifts" on public.shifts for select using (true);
 
+alter table public.qr_sessions enable row level security;
+create policy "Everyone can view QR sessions" on public.qr_sessions for select using (true);
+create policy "Admins can manage QR sessions" on public.qr_sessions for all using (true);
+
 alter table public.settings enable row level security;
 create policy "Everyone can view settings" on public.settings for select using (true);
 
@@ -152,6 +165,7 @@ alter publication supabase_realtime add table public.payroll;
 alter publication supabase_realtime add table public.notifications;
 alter publication supabase_realtime add table public.shifts;
 alter publication supabase_realtime add table public.settings;
+alter publication supabase_realtime add table public.qr_sessions;
 ```
 
 ## 4. Auth Configuration

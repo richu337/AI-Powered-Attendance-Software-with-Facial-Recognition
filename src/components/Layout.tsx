@@ -12,13 +12,14 @@ import {
   Menu, 
   X,
   Bell,
-  Settings
+  Settings as SettingsIcon,
+  ShieldAlert
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile, isAdmin, logout } = useAuth();
+  const { user, profile, isAdmin, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const navigate = useNavigate();
@@ -62,10 +63,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     { name: 'Notifications', icon: <Bell className="w-5 h-5" />, path: '/notifications', always: true, badge: unreadCount > 0 ? unreadCount : null },
     { name: 'Payroll', icon: <CreditCard className="w-5 h-5" />, path: '/payroll', adminOnly: true },
     { name: 'My Salary', icon: <CreditCard className="w-5 h-5" />, path: '/payroll', staffOnly: true },
-    { name: 'Settings', icon: <Settings className="w-5 h-5" />, path: '/settings', adminOnly: true },
+    { 
+      name: 'Settings (Configuration)', 
+      icon: <SettingsIcon className="w-5 h-5" />, 
+      path: '/settings', 
+      adminOnly: true
+    },
   ];
 
   const filteredNav = navItems.filter(item => {
+    if (item.name === 'Settings (Configuration)') {
+      const email = profile?.email?.toLowerCase().trim() || user?.email?.toLowerCase().trim();
+      return isAdmin || email === 'rayhanjaleel904@gmail.com';
+    }
+    
     if (item.always) return true;
     if (item.adminOnly) return isAdmin;
     if (item.staffOnly) return !isAdmin;
@@ -73,51 +84,69 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   });
 
   return (
-    <div className="min-h-screen bg-surface-main flex font-sans">
+    <div className="min-h-screen bg-bg-main flex font-sans selection:bg-brand-accent/20">
+      {/* Mobile Toggle */}
       <div className="lg:hidden fixed top-4 right-4 z-50">
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-3 bg-white rounded-xl shadow-lg border border-border-main"
+          className="p-2.5 bg-white rounded-xl shadow-xl border border-border-subtle text-brand-primary"
         >
-          {isSidebarOpen ? <X className="w-6 h-6 text-text-main" /> : <Menu className="w-6 h-6 text-text-main" />}
+          {isSidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {(isSidebarOpen || window.innerWidth >= 1024) && (
           <motion.aside 
-            initial={{ x: -300 }}
-            animate={{ x: 0 }}
-            exit={{ x: -300 }}
+            initial={{ x: -260, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -260, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className={cn(
-              "fixed lg:static inset-y-0 left-0 w-60 bg-sidebar-bg text-white z-40 transition-all shadow-xl lg:shadow-none flex flex-col",
+              "fixed lg:static inset-y-0 left-0 w-64 bg-brand-primary text-white z-40 flex flex-col border-r border-white/5",
               isSidebarOpen ? "block" : "hidden lg:flex"
             )}
           >
-            <div className="p-6 pb-8 flex items-center gap-3">
-              <span className="text-xl font-bold tracking-tight text-brand-indigo">AttendFlow AI</span>
+            {/* Sidebar Header */}
+            <div className="h-16 flex items-center px-6 border-b border-white/5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-brand-accent rounded-lg flex items-center justify-center shadow-lg shadow-brand-accent/20">
+                  <BarChart3 className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-lg font-bold tracking-tight text-white/95">AttendFlow AI</span>
+              </div>
             </div>
 
-            <nav className="flex-1 space-y-1">
-              <div className="px-6 py-2">
-                <p className="text-[10px] uppercase tracking-widest text-text-muted font-bold">Main Navigation</p>
+            {/* Navigation Section */}
+            <nav className="flex-1 py-6 overflow-y-auto px-3 space-y-0.5 custom-scrollbar">
+              <div className="px-3 mb-4">
+                <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Platform</p>
               </div>
+              
               {filteredNav.map((item) => (
                 <NavLink
                   key={item.path + item.name}
                   to={item.path}
                   onClick={() => setIsSidebarOpen(false)}
                   className={({ isActive }) => cn(
-                    "flex items-center gap-3 px-6 py-3.5 transition-all text-sm font-medium",
+                    "group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm font-medium",
                     isActive 
-                      ? "bg-sidebar-active text-white border-r-3 border-brand-indigo" 
-                      : "text-[#9CA3AF] hover:bg-white/5 hover:text-white"
+                      ? "bg-white/10 text-white shadow-sm" 
+                      : "text-white/50 hover:bg-white/5 hover:text-white/90"
                   )}
                 >
-                  <span className="opacity-80">{item.icon}</span>
-                  <span className="flex-1">{item.name}</span>
+                  <motion.span 
+                    whileHover={{ scale: 1.1 }}
+                    className={cn(
+                      "transition-colors",
+                      "group-hover:text-brand-accent"
+                    )}
+                  >
+                    {item.icon}
+                  </motion.span>
+                  <span className="flex-1 tracking-tight">{item.name}</span>
                   {item.badge && (
-                    <span className="bg-brand-indigo text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                    <span className="bg-brand-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lg shadow-brand-accent/20">
                       {item.badge}
                     </span>
                   )}
@@ -125,24 +154,26 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               ))}
             </nav>
 
-            <div className="p-4 border-t border-white/5">
-              <div className="mb-4 flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                <div className="w-8 h-8 bg-brand-indigo/20 rounded-full flex items-center justify-center text-brand-indigo font-bold text-xs uppercase">
+            {/* Sidebar Footer */}
+            <div className="p-4 bg-black/10 border-t border-white/5">
+              <div className="mb-4 flex items-center gap-3 p-2.5 rounded-xl bg-white/5">
+                <div className="w-9 h-9 bg-brand-accent/10 rounded-lg flex items-center justify-center text-brand-accent font-bold text-sm uppercase ring-1 ring-brand-accent/20">
                   {profile?.displayName?.charAt(0) || 'U'}
                 </div>
-                <div className="overflow-hidden">
-                  <p className="text-xs font-semibold text-white truncate">{profile?.displayName}</p>
-                  <p className="text-[10px] text-text-muted uppercase tracking-wider font-bold">
-                    {profile?.role} Mode
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-white truncate leading-none mb-1">{profile?.displayName}</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-black">
+                    {profile?.role}
                   </p>
                 </div>
               </div>
+              
               <button 
                 onClick={handleLogout}
-                className="w-full flex items-center gap-2 px-6 py-3 text-red-400 hover:bg-red-900/10 rounded-xl transition-all font-semibold text-sm"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-red-400 hover:bg-red-400/10 rounded-xl transition-all font-semibold text-xs group"
               >
-                <LogOut className="w-4 h-4" />
-                Logout
+                <LogOut className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+                Logout Session
               </button>
             </div>
           </motion.aside>
@@ -150,34 +181,44 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
-        <header className="fixed lg:static top-0 left-0 right-0 h-16 bg-white border-b border-border-main flex items-center justify-between px-8 z-30">
-          <div className="font-semibold text-lg">
-            {navItems.find(n => window.location.pathname === n.path)?.name || 'Overview'}
-          </div>
+        {/* Header */}
+        <header className="h-16 bg-white/80 backdrop-blur-md sticky top-0 border-b border-border-subtle z-30 px-4 sm:px-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
+            <h2 className="text-sm font-bold text-brand-primary uppercase tracking-widest">
+              {navItems.find(n => window.location.pathname === n.path)?.name || 'System Overview'}
+            </h2>
+          </div>
+          
+          <div className="flex items-center gap-3 sm:gap-6">
             <NavLink 
               to="/notifications" 
               className={cn(
-                "p-2 rounded-lg transition-all relative",
-                unreadCount > 0 ? "text-brand-indigo bg-indigo-50" : "text-text-muted hover:bg-gray-50"
+                "p-2 rounded-xl transition-all relative group",
+                unreadCount > 0 ? "text-brand-accent bg-brand-accent/10" : "text-text-secondary hover:bg-bg-main"
               )}
             >
-              <Bell className="w-5 h-5" />
+              <Bell className="w-5 h-5 transition-transform group-hover:rotate-12" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-brand-accent rounded-full border-2 border-white ring-2 ring-brand-accent/10" />
               )}
             </NavLink>
-            <span className="px-3 py-1 bg-indigo-50 text-brand-indigo text-xs font-bold rounded-full border border-indigo-100 uppercase tracking-wider">
-              {profile?.role} Mode
-            </span>
-            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-text-muted font-bold text-xs">
-              {profile?.displayName?.split(' ').map(n => n[0]).join('')}
+            
+            <div className="h-8 w-px bg-border-subtle hidden sm:block" />
+            
+            <div className="flex items-center gap-3 group cursor-pointer">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-brand-primary leading-tight">{profile?.displayName}</p>
+                <p className="text-[10px] text-text-tertiary lowercase tracking-tighter font-black">{profile?.email}</p>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-bg-main border border-border-subtle flex items-center justify-center text-brand-primary font-bold text-xs ring-offset-2 group-hover:ring-2 group-hover:ring-brand-accent/20 transition-all">
+                {profile?.displayName?.split(' ').map(n => n[0]).join('')}
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 p-8 pt-24 lg:pt-8 overflow-y-auto">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 relative">
+          <div className="p-4 sm:p-8 w-full relative z-10">
             {children}
           </div>
         </main>

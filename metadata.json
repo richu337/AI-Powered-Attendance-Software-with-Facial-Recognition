@@ -2,7 +2,8 @@
   "name": "ai-powered-attendance-software",
   "description": "An intelligent attendance management system featuring AI-driven tracking, role-based access, and facial recognition capabilities for secure staff management.",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "geolocation"
   ],
   "majorCapabilities": []
 }

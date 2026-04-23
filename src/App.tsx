@@ -14,6 +14,7 @@ import { LeaveManager } from './components/LeaveManager';
 import { PayrollManager } from './components/PayrollManager';
 import { NotificationManager } from './components/NotificationManager';
 import { SettingsManager } from './components/SettingsManager';
+import { EntranceKiosk } from './components/EntranceKiosk';
 import { Loader2 } from 'lucide-react';
 
 function AppRoutes() {
@@ -32,27 +33,35 @@ function AppRoutes() {
   }
 
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/attendance" element={<AttendanceManager />} />
-        <Route path="/leaves" element={<LeaveManager />} />
-        <Route path="/notifications" element={<NotificationManager />} />
-        
-        {/* Admin Only Routes */}
-        {isAdmin && (
-          <>
-            <Route path="/staff" element={<StaffManager />} />
-            <Route path="/settings" element={<SettingsManager />} />
-          </>
-        )}
+    <Routes>
+      <Route path="/kiosk" element={<EntranceKiosk />} />
+      <Route 
+        path="*" 
+        element={
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/attendance" element={<AttendanceManager />} />
+              <Route path="/leaves" element={<LeaveManager />} />
+              <Route path="/notifications" element={<NotificationManager />} />
+              
+              {/* Admin Only Routes */}
+              {isAdmin && (
+                <>
+                  <Route path="/staff" element={<StaffManager />} />
+                  <Route path="/settings" element={<SettingsManager />} />
+                </>
+              )}
 
-        {/* Global Payroll (Content depends on role) */}
-        <Route path="/payroll" element={<PayrollManager />} />
-        
-        <Route path="*" element={<Navigate to="/" />} />
-      </Routes>
-    </Layout>
+              {/* Global Payroll (Content depends on role) */}
+              <Route path="/payroll" element={<PayrollManager />} />
+              
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </Layout>
+        } 
+      />
+    </Routes>
   );
 }
 

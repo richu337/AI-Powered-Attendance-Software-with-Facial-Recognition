@@ -24,6 +24,7 @@ export interface Staff {
   userId?: string;
   isAdmin?: boolean;
   pin?: string; // For clocking in without Google
+  password?: string; // For direct login with Staff ID
   faceEmbedding?: number[]; // For Python face recognition
 }
 
@@ -37,6 +38,8 @@ export interface Attendance {
   status: AttendanceStatus;
   checkIn?: string;
   checkOut?: string;
+  latitude?: number;
+  longitude?: number;
   notes?: string;
   aiVerified?: boolean;
   faceMatchScore?: number; // Score from Python
