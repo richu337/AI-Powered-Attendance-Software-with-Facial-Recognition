@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from './AuthProvider';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogIn, User, Shield, AlertCircle } from 'lucide-react';
-import illustration from '../images/1.png';
 
 export const Login: React.FC = () => {
   const { loginAdmin, loginStaff } = useAuth();
@@ -162,7 +161,7 @@ export const Login: React.FC = () => {
           className="absolute bottom-[-5%] right-[-5%] w-[450px] h-[450px] pointer-events-none select-none z-0"
         >
           <img 
-            src={illustration} 
+            src="/1.png" 
             alt="Employee Management Illustration" 
             className="w-full h-full object-contain"
             referrerPolicy="no-referrer"
@@ -175,7 +174,7 @@ export const Login: React.FC = () => {
         {/* Abstract Background */}
         <div className="absolute inset-0 z-0">
           <img 
-            src={illustration} 
+            src="/1.png" 
             alt="Workforce Management" 
             className="w-full h-full object-cover opacity-100 scale-105 p-20"
             referrerPolicy="no-referrer"
