@@ -152,34 +152,14 @@ export const Login: React.FC = () => {
              <span className="text-[10px] uppercase tracking-[0.5em] font-black text-brand-primary whitespace-nowrap">Secure Terminal Ver 2.4.0</span>
           </div>
         </motion.div>
-
-        {/* Decorative Image in Bottom Right of Sign-in area as requested */}
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.5, duration: 1 }}
-          className="absolute bottom-[-5%] right-[-5%] w-[450px] h-[450px] pointer-events-none select-none z-0"
-        >
-          <img 
-            src="/1.png" 
-            alt="Employee Management Illustration" 
-            className="w-full h-full object-contain"
-            referrerPolicy="no-referrer"
-          />
-        </motion.div>
       </div>
 
       {/* Right Panel: Hero Section */}
       <div className="hidden lg:flex lg:w-1/2 xl:w-[55%] relative bg-brand-primary items-center justify-center overflow-hidden">
-        {/* Abstract Background */}
-        <div className="absolute inset-0 z-0">
-          <img 
-            src="/1.png" 
-            alt="Workforce Management" 
-            className="w-full h-full object-cover opacity-100 scale-105 p-20"
-            referrerPolicy="no-referrer"
-          />
-          <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/90 via-brand-primary/20 to-transparent" />
+        {/* Abstract Background with CSS only */}
+        <div className="absolute inset-0 z-0 text-white">
+          <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/95 via-brand-primary/40 to-brand-accent/5" />
+          <div className="absolute top-[-10%] right-[-10%] w-[60%] h-[60%] bg-brand-accent/10 blur-[120px] rounded-full" />
         </div>
 
         {/* Hero Content */}
